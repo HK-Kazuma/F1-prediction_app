@@ -110,6 +110,24 @@ WEATHER_EARLY_SAMPLE_COUNT = 10
 SESSION_RACE = "R"
 SESSION_QUALIFYING = "Q"
 
+# ---------- APIレート制御 ----------
+
+# FastF1の上限は500リクエスト/時 = 8.3コール/分。
+# 1セッションのload()は内部で約7〜8サブリクエストを発行する。
+# 1ラウンド（決勝+予選）≒ 10コール → 上限内に収めるには最低72秒/ラウンド必要。
+# 安全マージンを取って90秒に設定する。
+
+# 決勝ロード → スリープ → 予選ロードの間（同一ラウンド内の2セッション間）
+FETCH_SLEEP_SECONDS_BETWEEN_SESSIONS = 15
+
+# 1ラウンド完了 → 次のラウンド開始までの待機（コール数を1時間500以内に抑えるため）
+FETCH_SLEEP_SECONDS_BETWEEN_ROUNDS = 75
+
+# レート上限エラー発生時のリトライ設定。
+# 上限リセットは1時間単位なので長めに待つ
+FETCH_RATE_LIMIT_RETRY_WAIT_SECONDS = 120
+FETCH_MAX_RETRIES = 3
+
 # ---------- パス ----------
 
 DATA_CACHE_DIR = "data/cache"

@@ -19,10 +19,9 @@ from src.constants import (
     TRAINING_START_YEAR,
 )
 from src.evaluate import build_evaluation_report, format_evaluation_report_for_display
-from src.features import build_feature_table_for_session, build_training_dataset
+from src.features import build_feature_table_for_session
 from src.fetch import (
     configure_fastf1_cache,
-    fetch_all_session_pairs_for_years,
     load_qualifying_session,
     load_race_session,
 )
@@ -56,22 +55,14 @@ def get_feature_columns(df: pd.DataFrame) -> list[str]:
 
 
 @st.cache_data(show_spinner=False)
-def load_or_build_training_data() -> pd.DataFrame:
+def load_training_data_from_csv() -> pd.DataFrame:
     """
-    キャッシュ済みCSVがあればそれを返し、なければFastF1から全データを取得・構築する。
-    st.cache_dataでStreamlit起動中はメモリに保持し、再ロードを防ぐ。
+    CSVから学習データを読み込む。
+    データ収集はアプリと分離して build_dataset.py で行う。
+    Streamlit起動時にAPI大量呼び出しが走るとレート上限に引っかかるため、
+    app.pyはCSVを読むだけに徹する設計にしている。
     """
-    processed_path = Path(TRAINING_DATA_PATH)
-    if processed_path.exists():
-        return pd.read_csv(processed_path)
-
-    configure_fastf1_cache()
-    session_pairs = fetch_all_session_pairs_for_years(TRAINING_START_YEAR, TRAINING_END_YEAR)
-    df = build_training_dataset(session_pairs)
-
-    Path(DATA_PROCESSED_DIR).mkdir(parents=True, exist_ok=True)
-    df.to_csv(processed_path, index=False)
-    return df
+    return pd.read_csv(TRAINING_DATA_PATH)
 
 
 @st.cache_resource(show_spinner=False)
@@ -196,9 +187,25 @@ def main() -> None:
         f"テストデータ: {TEST_YEAR}"
     )
 
+    # --- 学習データの存在確認 ---
+    # データ収集は build_dataset.py で行う。CSVがなければ手順を案内して停止する。
+    if not Path(TRAINING_DATA_PATH).exists():
+        st.error("学習データが見つかりません。")
+        st.info(
+            "**最初に以下のコマンドでデータを収集してください（一度だけ実行）:**\n\n"
+            "```\n"
+            "python build_dataset.py\n"
+            "```\n\n"
+            "特定の年だけ試したい場合:\n\n"
+            "```\n"
+            "python build_dataset.py --start-year 2023 --end-year 2024\n"
+            "```"
+        )
+        st.stop()
+
     # --- 学習データとモデルの読み込み ---
     with st.spinner("学習データを読み込み中..."):
-        train_df = load_or_build_training_data()
+        train_df = load_training_data_from_csv()
 
     feature_cols = get_feature_columns(train_df)
 

@@ -60,6 +60,31 @@ def build_xgboost_regressor() -> xgb.XGBRegressor:
     )
 
 
+def _predict_with_dmatrix(model: xgb.XGBRegressor, X: pd.DataFrame) -> np.ndarray:
+    """
+    DMatrix を明示的に構築して booster で予測する共通ヘルパー。
+
+    xgb.DMatrix(DataFrame) はバージョンによって feature_names を自動セットしない場合がある。
+    booster に保存された特徴量名を取り出し、同じ順序で列を並べた上で
+    numpy 配列 + feature_names を明示的に DMatrix に渡すことで
+    どのバージョンでも確実に特徴量名の照合が通るようにする。
+    """
+    booster = model.get_booster()
+    feature_names = booster.feature_names  # 学習時に booster に保存された特徴量名
+
+    if feature_names is not None:
+        # 学習時の列順に揃えてから numpy に変換する。
+        # 列順が違うと正しい特徴量に正しい重みが当たらないため必須。
+        X_aligned = X.reindex(columns=feature_names)
+        dmatrix = xgb.DMatrix(X_aligned.values, feature_names=feature_names)
+    else:
+        # 学習時に feature_names が保存されていない場合（DataFrame 以外で学習した場合）は
+        # numpy に変換して検証なしで渡す
+        dmatrix = xgb.DMatrix(X.values)
+
+    return booster.predict(dmatrix)
+
+
 def train_model(
     X_train: pd.DataFrame,
     y_train: pd.Series,
@@ -91,8 +116,8 @@ def run_cross_validation(
         y_fold_val = y.iloc[fold_val_idx]
         weights_fold_train = sample_weights[fold_train_idx]
 
-        model = train_model(X_fold_train, y_fold_train, weights_fold_train)
-        y_pred = model.predict(X_fold_val)
+        fold_model = train_model(X_fold_train, y_fold_train, weights_fold_train)
+        y_pred = _predict_with_dmatrix(fold_model, X_fold_val)
         mae_scores.append(mean_absolute_error(y_fold_val, y_pred))
 
     return mae_scores
@@ -103,7 +128,7 @@ def predict_race_positions(model: xgb.XGBRegressor, X: pd.DataFrame) -> np.ndarr
     特徴量テーブルから予測順位値（連続値）を返す。
     整数化は呼び出し側で行う（評価・表示それぞれで丸め方が異なる場合があるため）。
     """
-    return model.predict(X)
+    return _predict_with_dmatrix(model, X)
 
 
 def get_feature_importance_table(
@@ -129,7 +154,11 @@ def save_model(model: xgb.XGBRegressor, path: str = MODEL_SAVE_PATH) -> None:
 
 
 def load_model(path: str = MODEL_SAVE_PATH) -> xgb.XGBRegressor:
-    """保存済みモデルをロードして返す。"""
+    """
+    保存済みモデルをロードして返す。
+    predict は _predict_with_dmatrix 経由で呼ぶため、
+    sklearn ラッパーの feature_names_in_ 問題は発生しない。
+    """
     model = build_xgboost_regressor()
     model.load_model(path)
     return model
