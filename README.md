@@ -1,52 +1,52 @@
 # F1 Race Prediction App
 
-F1決勝レースの順位をデータ分析・機械学習により予測するアプリケーション。
+A machine learning application that predicts F1 race finishing positions using historical race data.
 
-予選タイム・タイヤ戦略・天候・ピット回数などのレースデータをもとに XGBoost で順位を予測し、Streamlit のダッシュボードで結果を可視化する。
-
----
-
-## 機能（Phase 1）
-
-- FastF1 を使った 2018〜2024 年の F1 レースデータ取得・キャッシュ
-- 予選順位・タイヤ・ピット・天候などの特徴量エンジニアリング
-- XGBoost による決勝順位予測
-- 時系列交差検証（TimeSeriesSplit）によるモデル評価
-- ベースライン（予選順位そのまま）との精度比較
-- Streamlit ダッシュボードでの予測順位表・特徴量重要度グラフ表示
+The model uses qualifying times, tyre strategy, weather conditions, and pit stop data to predict finishing order via XGBoost, with results visualized in a Streamlit dashboard.
 
 ---
 
-## 動作環境
+## Features (Phase 1)
 
-- Python 3.10 以上
-- インターネット接続（初回のデータ取得時のみ）
+- Historical F1 race data acquisition (2018–2024) via FastF1 with local caching
+- Feature engineering from qualifying, tyre, pit stop, and weather data
+- XGBoost regression model for finishing position prediction
+- Time-series cross-validation (TimeSeriesSplit) to prevent data leakage
+- Baseline comparison against "qualifying position = finishing position"
+- Streamlit dashboard showing predicted standings and feature importance
 
 ---
 
-## セットアップ手順
+## Requirements
 
-### 1. リポジトリをクローン
+- Python 3.10+
+- Internet connection (required only for initial data collection)
+
+---
+
+## Setup
+
+### 1. Clone the repository
 
 ```bash
 git clone https://github.com/<your-username>/F1-prediction_app.git
 cd F1-prediction_app
 ```
 
-### 2. 仮想環境を作成・有効化
+### 2. Create and activate a virtual environment
 
 ```bash
-# 仮想環境を作成
+# Create virtual environment
 python -m venv venv
 
-# 有効化（Mac / Linux）
+# Activate (Mac / Linux)
 source venv/bin/activate
 
-# 有効化（Windows PowerShell）
+# Activate (Windows PowerShell)
 venv\Scripts\Activate.ps1
 ```
 
-### 3. 依存パッケージをインストール
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
@@ -54,22 +54,20 @@ pip install -r requirements.txt
 
 ---
 
-## データ取得
+## Data Collection
 
-学習データは FastF1 API から取得する。  
-**初回のみ実行が必要。取得後はローカルキャッシュに保存されるため2回目以降は不要。**
+Training data is fetched from the FastF1 API.  
+**This step is only required once.** Data is cached locally after the first download.
 
-### 手順
-
-#### ① 特定の年だけ試したい場合（推奨・短時間）
+### Quick start (2 seasons only, recommended for testing)
 
 ```bash
 python build_dataset.py --start-year 2023 --end-year 2024
 ```
 
-#### ② 全学習データを取得する場合（完全版）
+### Full dataset (2018–2024)
 
-年ごとに分けて実行することを推奨（API レート上限: 500リクエスト/時）。
+Due to the FastF1 API rate limit (500 requests/hour), fetching one year at a time is recommended.
 
 ```bash
 python build_dataset.py --start-year 2018 --end-year 2018
@@ -81,107 +79,106 @@ python build_dataset.py --start-year 2023 --end-year 2023
 python build_dataset.py --start-year 2024 --end-year 2024
 ```
 
-全年のキャッシュが揃ったら CSV を一括作成する。
+Once all years are cached, build the combined CSV:
 
 ```bash
 python build_dataset.py --start-year 2018 --end-year 2024 --force
 ```
 
-#### 注意事項
+### Notes
 
-- 1年あたりの取得時間：約 40〜60 分（キャッシュなしの場合）
-- 途中で止めても問題なし。`Ctrl+C` で中断後、同じコマンドを再実行するとキャッシュ済みのラウンドをスキップして再開する
-- キャッシュの保存先：`data/cache/`
-- 生成される CSV：`data/processed/training_features.csv`
+- Estimated time per year: 40–60 minutes (first run, no cache)
+- Safe to interrupt with `Ctrl+C` — cached rounds are skipped on restart
+- Cache location: `data/cache/`
+- Output CSV: `data/processed/training_features.csv`
 
 ---
 
-## アプリの起動
+## Running the App
 
 ```bash
 streamlit run app.py
 ```
 
-ブラウザで `http://localhost:8501` が開く。
+Open `http://localhost:8501` in your browser.
 
 ---
 
-## アプリの使い方
+## How to Use
 
-### サイドバー
+### Sidebar
 
-| 項目 | 説明 |
+| Field | Description |
 |---|---|
-| シーズン | 予測したいレースの年を選択 |
-| ラウンド番号 | 第何戦かを入力（1〜24）|
-| サーキット名・国名 | 選択したラウンドの開催地が自動表示される |
+| Season | Select the race year |
+| Round Number | Enter the round (1–24) |
+| Circuit / Country | Auto-displays the venue for the selected round |
 
-### 特徴量重要度グラフ
+### Feature Importance
 
-モデルがどの特徴量を重視しているかを棒グラフで表示する。  
-「予選順位（quali_pos）」が最も重要な特徴量になることが多い。
+A bar chart showing which features the model relies on most.  
+`quali_pos` (qualifying position) is typically the most important feature.
 
-### 予測を実行
+### Run Prediction
 
-選択したレースのデータを取得し、決勝順位を予測して表示する。  
-過去のレースを選択した場合は実際の結果との比較（MAE・Top-5的中率）も表示される。
+Fetches data for the selected race and predicts finishing order.  
+For past races, actual results are shown alongside predictions with MAE and Top-5 hit rate.
 
-### 交差検証
+### Cross-Validation
 
-時系列交差検証（TimeSeriesSplit）を実行し、モデルの汎化性能を確認する。  
-ベースライン（予選順位そのまま）との比較で、モデルの有効性を評価する。
+Runs time-series cross-validation to evaluate model generalization.  
+Results are compared against the baseline to confirm the model adds value beyond qualifying order.
 
 ---
 
-## 評価指標
+## Evaluation Metrics
 
-| 指標 | 説明 | Phase 1 目標 |
+| Metric | Description | Phase 1 Target |
 |---|---|---|
-| MAE（平均絶対誤差） | 予測順位と実際の順位の平均ずれ幅 | 4〜6位以内 |
-| Top-5 的中率 | 上位5位以内のドライバーをどれだけ当てられるか | 40〜50% |
-| ベースライン比 | 「予選順位そのまま」より精度が高いか | 上回れば合格 |
+| MAE | Mean absolute error between predicted and actual position | Within 4–6 places |
+| Top-5 Hit Rate | Fraction of top-5 finishers correctly predicted | 40–50% |
+| vs Baseline | Does the model outperform "qualifying = finishing"? | Must exceed baseline |
 
 ---
 
-## ファイル構成
+## Project Structure
 
 ```
 F1-prediction_app/
-├── app.py                  # Streamlit ダッシュボード
-├── build_dataset.py        # 学習データ収集スクリプト（初回のみ実行）
-├── explore_data.py         # FastF1 データ構造の確認スクリプト
-├── requirements.txt        # 依存パッケージ
+├── app.py                  # Streamlit dashboard
+├── build_dataset.py        # Data collection script (run once)
+├── explore_data.py         # FastF1 data structure explorer
+├── requirements.txt
 ├── data/
-│   ├── cache/              # FastF1 キャッシュ（自動生成・git管理外）
-│   └── processed/          # 学習データ CSV・モデルファイル（自動生成・git管理外）
-├── src/
-│   ├── constants.py        # 全定数の定義
-│   ├── fetch.py            # FastF1 データ取得
-│   ├── features.py         # 特徴量エンジニアリング
-│   ├── model.py            # XGBoost 学習・予測・保存
-│   ├── evaluate.py         # 評価指標の計算
-│   └── rag/                # Phase 2 以降（LightRAG 連携）
-└── notebooks/              # 分析・実験用 Jupyter Notebook
+│   ├── cache/              # FastF1 cache (auto-generated, not tracked by git)
+│   └── processed/          # Training CSV and model file (auto-generated, not tracked by git)
+└── src/
+    ├── constants.py        # All project-wide constants
+    ├── fetch.py            # FastF1 data fetching with rate-limit handling
+    ├── features.py         # Feature engineering pipeline
+    ├── model.py            # XGBoost training, prediction, and persistence
+    ├── evaluate.py         # MAE, Top-N metrics, baseline comparison
+    └── rag/                # Phase 2+ (LightRAG integration placeholder)
 ```
 
 ---
 
-## 開発ロードマップ
+## Roadmap
 
-| フェーズ | 内容 | 状態 |
+| Phase | Description | Status |
 |---|---|---|
-| Phase 1 | FastF1 データ + XGBoost MVP | ✅ 完了 |
-| Phase 2 | LightRAG + LLM によるチームDNAスコア統合 | 🔜 次フェーズ |
-| Phase 3 | ベイズ更新 + モンテカルロシミュレーション | 🔜 将来 |
+| Phase 1 | FastF1 data pipeline + XGBoost MVP | ✅ Complete |
+| Phase 2 | LightRAG + LLM team DNA scoring | 🔜 Next |
+| Phase 3 | Bayesian updating + Monte Carlo simulation | 🔜 Planned |
 
 ---
 
-## 技術スタック
+## Tech Stack
 
-| カテゴリ | ライブラリ |
+| Category | Library |
 |---|---|
-| データ取得 | FastF1, OpenF1 API |
-| データ加工 | pandas, scikit-learn |
-| ML 予測 | XGBoost |
-| UI | Streamlit |
-| グラフ描画 | Plotly |
+| Data acquisition | FastF1, OpenF1 API |
+| Data processing | pandas, scikit-learn |
+| ML model | XGBoost |
+| Dashboard | Streamlit |
+| Visualization | Plotly |
