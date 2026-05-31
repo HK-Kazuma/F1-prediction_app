@@ -87,6 +87,25 @@ def get_round_numbers_for_year(year: int) -> list[int]:
     return schedule["RoundNumber"].tolist()
 
 
+def get_event_info(year: int, round_number: int) -> dict:
+    """
+    指定した年・ラウンドのサーキット名と国名を返す。
+    ラウンド番号だけではどこで開催されるか分からないため、
+    サイドバーやヘッダーの表示に使う。
+    """
+    schedule = fastf1.get_event_schedule(year, include_testing=False)
+    event = schedule[schedule["RoundNumber"] == round_number]
+
+    if event.empty:
+        return {"circuit_name": "Unknown", "country": "Unknown"}
+
+    row = event.iloc[0]
+    return {
+        "circuit_name": str(row.get("Location", "Unknown")),
+        "country": str(row.get("Country", "Unknown")),
+    }
+
+
 def fetch_session_pair_for_round(year: int, round_number: int) -> dict | None:
     """
     1ラウンド分の予選・決勝セッションペアを辞書で返す。

@@ -22,6 +22,8 @@ from src.evaluate import build_evaluation_report, format_evaluation_report_for_d
 from src.features import build_feature_table_for_session
 from src.fetch import (
     configure_fastf1_cache,
+    get_event_info,
+    get_round_numbers_for_year,
     load_qualifying_session,
     load_race_session,
 )
@@ -181,6 +183,15 @@ def main() -> None:
     selected_round = st.sidebar.number_input(
         "ラウンド番号", min_value=1, max_value=24, value=1, step=1
     )
+
+    # ラウンド番号だけでは開催地が分からないため、サーキット名・国名を取得して表示する
+    configure_fastf1_cache()
+    event_info = get_event_info(selected_year, int(selected_round))
+    st.sidebar.info(
+        f"🏁 **{event_info['circuit_name']}**\n\n"
+        f"🌍 {event_info['country']}"
+    )
+
     st.sidebar.divider()
     st.sidebar.caption(
         f"学習データ: {TRAINING_START_YEAR}〜{TRAINING_END_YEAR}\n"
@@ -218,7 +229,10 @@ def main() -> None:
     st.divider()
 
     # --- レース予測 ---
-    st.header(f"レース予測: {selected_year} Round {selected_round}")
+    st.header(
+        f"レース予測: {selected_year} Round {selected_round} "
+        f"— {event_info['circuit_name']} ({event_info['country']})"
+    )
 
     if st.button("予測を実行", type="primary"):
         with st.spinner("データ取得中..."):
