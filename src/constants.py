@@ -50,9 +50,6 @@ TOP_N_POSITIONS = 5
 
 TARGET_COLUMN = "finish_pos"
 
-# FastF1が返すタイヤ種文字列（OneHotEncode対象）
-TYRE_COMPOUNDS = ["SOFT", "MEDIUM", "HARD", "INTERMEDIATE", "WET"]
-
 # ---------- サーキット種別 ----------
 
 # FIA公式分類ではなく、予測モデルの特徴量として意味のある3種類に独自分類

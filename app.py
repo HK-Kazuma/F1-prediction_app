@@ -134,12 +134,34 @@ def render_evaluation_section(
     report_df = format_evaluation_report_for_display(report)
     st.dataframe(report_df, use_container_width=True, hide_index=True)
 
-    # MAEの改善量でベースラインを超えているか一目で分かるようにする
-    improvement = report["baseline_mae"] - report["model_mae"]
-    if improvement > 0:
-        st.success(f"ベースライン比 MAE を {improvement:.2f} 改善しています ✓")
+    # MAE・Top-5 の両方を見て総合判定する。
+    # MAEだけ見ると Top-5 でベースラインに負けていても「改善」と表示されてしまうため。
+    mae_better   = report["model_mae"]             < report["baseline_mae"]
+    top5_better  = report["model_top5_hit_rate"]   > report["baseline_top5_hit_rate"]
+    top5_equal   = report["model_top5_hit_rate"]  == report["baseline_top5_hit_rate"]
+    mae_diff     = report["baseline_mae"]          - report["model_mae"]
+    top5_diff    = report["model_top5_hit_rate"]   - report["baseline_top5_hit_rate"]
+
+    if mae_better and (top5_better or top5_equal):
+        st.success(
+            f"MAE をベースライン比 {mae_diff:.2f} 改善 ✓  "
+            f"／  Top-5 は {'同率' if top5_equal else f'{top5_diff:.0%} 改善'}"
+        )
+    elif mae_better and not top5_better:
+        st.warning(
+            f"MAE はベースライン比 {mae_diff:.2f} 改善 ✓  "
+            f"／  Top-5 はベースラインに {abs(top5_diff):.0%} 負け ⚠️"
+        )
+    elif not mae_better and (top5_better or top5_equal):
+        st.warning(
+            f"MAE はベースラインより {abs(mae_diff):.2f} 悪化 ⚠️  "
+            f"／  Top-5 は {'同率' if top5_equal else f'{top5_diff:.0%} 改善'} ✓"
+        )
     else:
-        st.warning(f"ベースラインより MAE が {abs(improvement):.2f} 悪化しています。特徴量・パラメータを見直してください。")
+        st.error(
+            f"MAE・Top-5 ともにベースライン以下 ❌  "
+            f"特徴量・パラメータを見直してください。"
+        )
 
 
 def render_cv_section(train_df: pd.DataFrame, feature_cols: list[str]) -> None:
@@ -177,8 +199,8 @@ def main() -> None:
     st.sidebar.header("設定")
     selected_year = st.sidebar.selectbox(
         "シーズン",
-        options=list(range(TRAINING_START_YEAR, TEST_YEAR + 1)),
-        index=list(range(TRAINING_START_YEAR, TEST_YEAR + 1)).index(TEST_YEAR),
+        options=[TEST_YEAR],
+        index=0,
     )
     selected_round = st.sidebar.number_input(
         "ラウンド番号", min_value=1, max_value=24, value=1, step=1

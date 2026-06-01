@@ -13,7 +13,6 @@ from src.constants import (
     CIRCUIT_TYPE_UNKNOWN_FALLBACK,
     MAX_GAP_TO_POLE_SECONDS,
     TARGET_COLUMN,
-    TYRE_COMPOUNDS,
     WEATHER_EARLY_SAMPLE_COUNT,
 )
 
@@ -30,6 +29,12 @@ def extract_qualifying_features(quali_session: fastf1.core.Session) -> pd.DataFr
     ].copy()
     results["DriverNumber"] = results["DriverNumber"].astype(str)
     results = results.rename(columns={"Position": "quali_pos"})
+    # 予選不出走（DNS/DSQ等）のドライバーはPositionがNaNになる。
+    # quali_posが使えない行は特徴量として意味がないため除外する。
+    excluded = results[results["quali_pos"].isna()]["Abbreviation"].tolist()
+    if excluded:
+        print(f"[INFO] Excluded drivers with no qualifying position: {excluded}")
+    results = results.dropna(subset=["quali_pos"])
     results["quali_pos"] = results["quali_pos"].astype(int)
 
     pole_time_seconds = _get_pole_time_seconds(results)
@@ -86,55 +91,6 @@ def extract_finish_positions(race_session: fastf1.core.Session) -> pd.DataFrame:
     return results[["DriverNumber", "Abbreviation", "finish_pos"]]
 
 
-# ---------- タイヤ特徴量 ----------
-
-def extract_tyre_start_features(race_session: fastf1.core.Session) -> pd.DataFrame:
-    """
-    スタート時のタイヤ種と使用済み周回数を返す。
-    スタート時点の状態がレース戦略（1ストップ・2ストップ等）の起点になるため
-    レース序盤の順位予測に影響する。
-    columns: DriverNumber, tyre_compound, tyre_age
-    """
-    laps = race_session.laps.copy()
-    laps["DriverNumber"] = laps["DriverNumber"].astype(str)
-
-    # ラップ1に限定してスタート時タイヤを取得。1周目クラッシュ等でラップ1がない場合は
-    # そのドライバーはNaNのままになりmerge後にデフォルト値で補完される
-    lap1_per_driver = (
-        laps[laps["LapNumber"] == 1]
-        .groupby("DriverNumber", as_index=False)
-        .first()[["DriverNumber", "Compound", "TyreLife"]]
-        .rename(columns={"Compound": "tyre_compound", "TyreLife": "tyre_age"})
-    )
-    return lap1_per_driver
-
-
-# ---------- ピット特徴量 ----------
-
-def extract_pit_stop_features(race_session: fastf1.core.Session) -> pd.DataFrame:
-    """
-    ドライバーごとのピット回数と最終ピットラップ番号を返す。
-    PitInTimeがNotNaのラップ＝そのラップでピットに入ったことを意味する。
-    columns: DriverNumber, pit_count, last_pit_lap
-    """
-    laps = race_session.laps.copy()
-    laps["DriverNumber"] = laps["DriverNumber"].astype(str)
-
-    pit_in_laps = laps[laps["PitInTime"].notna()]
-
-    pit_count = (
-        pit_in_laps.groupby("DriverNumber")
-        .size()
-        .reset_index(name="pit_count")
-    )
-    last_pit_lap = (
-        pit_in_laps.groupby("DriverNumber")["LapNumber"]
-        .max()
-        .reset_index(name="last_pit_lap")
-    )
-    return pit_count.merge(last_pit_lap, on="DriverNumber", how="left")
-
-
 # ---------- 天候特徴量 ----------
 
 def extract_weather_summary(race_session: fastf1.core.Session) -> dict:
@@ -166,20 +122,6 @@ def encode_circuit_type(country_name: str) -> int:
     return CIRCUIT_TYPE_ENCODING[circuit_type]
 
 
-# ---------- タイヤワンホットエンコード ----------
-
-def one_hot_encode_tyre_compound(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    tyre_compound列をワンホットエンコードして返す。
-    XGBoostはカテゴリ文字列をそのまま扱えないため数値化が必要。
-    元の tyre_compound 列は削除する。
-    """
-    for compound in TYRE_COMPOUNDS:
-        col_name = f"tyre_{compound.lower()}"
-        df[col_name] = (df["tyre_compound"] == compound).astype(int)
-    return df.drop(columns=["tyre_compound"])
-
-
 # ---------- セッション→特徴量テーブル変換 ----------
 
 def build_feature_table_for_session(
@@ -194,21 +136,11 @@ def build_feature_table_for_session(
     """
     quali_features = extract_qualifying_features(quali_session)
     finish_positions = extract_finish_positions(race_session)
-    tyre_features = extract_tyre_start_features(race_session)
-    pit_features = extract_pit_stop_features(race_session)
     weather = extract_weather_summary(race_session)
     circuit_type_encoded = encode_circuit_type(race_session.event["Country"])
 
     # 決勝結果を基準にinner joinすることで、予選データがないドライバーを除外する
     df = finish_positions.merge(quali_features, on=["DriverNumber", "Abbreviation"], how="inner")
-    df = df.merge(tyre_features, on="DriverNumber", how="left")
-    df = df.merge(pit_features, on="DriverNumber", how="left")
-
-    # ピット回数・タイヤ年齢はデータ欠損ドライバー（DNS等）に対して0を補完する
-    df["pit_count"] = df["pit_count"].fillna(0).astype(int)
-    df["last_pit_lap"] = df["last_pit_lap"].fillna(0).astype(int)
-    df["tyre_age"] = df["tyre_age"].fillna(0).astype(int)
-    df["tyre_compound"] = df["tyre_compound"].fillna("UNKNOWN")
 
     df["air_temp"] = weather["air_temp"]
     df["rain"] = weather["rain"]
@@ -223,7 +155,7 @@ def build_feature_table_for_session(
     df = df.dropna(subset=[TARGET_COLUMN])
     df[TARGET_COLUMN] = df[TARGET_COLUMN].astype(int)
 
-    return one_hot_encode_tyre_compound(df)
+    return df
 
 
 # ---------- 複数セッション→学習データセット ----------

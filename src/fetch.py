@@ -66,7 +66,7 @@ def load_race_session(year: int, round_number: int) -> fastf1.core.Session:
     """
     return _load_session_with_retry(
         year, round_number, SESSION_RACE,
-        {"laps": True, "telemetry": False, "weather": True, "messages": False},
+        {"laps": False, "telemetry": False, "weather": True, "messages": False},
     )
 
 
