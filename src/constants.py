@@ -28,11 +28,11 @@ POST_REGULATION_CHANGE_WEIGHT = 1.0
 # F1データは年400〜500行と小規模。ニューラルネットと違いXGBoostは少データでも
 # 安定するが、それでも過学習しやすいため木の深さ・学習率を保守的に設定する
 
-XGBOOST_N_ESTIMATORS = 300
+XGBOOST_N_ESTIMATORS = 246
 XGBOOST_MAX_DEPTH = 4           # 浅い木で局所パターンへの過適合を防ぐ
-XGBOOST_LEARNING_RATE = 0.05    # 小刻みに学習させて汎化性能を高める
-XGBOOST_SUBSAMPLE = 0.8         # 各ツリーで80%のサンプルだけ使い多様性を保つ
-XGBOOST_COLSAMPLE_BYTREE = 0.8  # 各ツリーで80%の特徴量だけ使い特定特徴量への依存を防ぐ
+XGBOOST_LEARNING_RATE = 0.0298  # 小刻みに学習させて汎化性能を高める
+XGBOOST_SUBSAMPLE = 0.7395      # 各ツリーで使うサンプル比率
+XGBOOST_COLSAMPLE_BYTREE = 0.7304  # 各ツリーで使う特徴量比率
 XGBOOST_MIN_CHILD_WEIGHT = 3    # リーフに最低3サンプル必要にして過学習を抑制
 XGBOOST_RANDOM_STATE = 42
 

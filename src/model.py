@@ -7,8 +7,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+from scipy.stats import randint, uniform
 from sklearn.metrics import mean_absolute_error
-from sklearn.model_selection import TimeSeriesSplit
+from sklearn.model_selection import RandomizedSearchCV, TimeSeriesSplit
 
 from src.constants import (
     CV_N_SPLITS,
@@ -142,6 +143,52 @@ def get_feature_importance_table(
         .sort_values("importance", ascending=False)
         .reset_index(drop=True)
     )
+
+
+def tune_hyperparameters(
+    X: pd.DataFrame,
+    y: pd.Series,
+    sample_weights: np.ndarray,
+    n_iter: int = 50,
+    verbose: int = 1,
+) -> dict:
+    """
+    RandomizedSearchCV + TimeSeriesSplit でハイパーパラメータを探索し、
+    最良パラメータの辞書を返す。
+
+    sample_weights は RandomizedSearchCV に渡すと fold ごとに自動スライスされるため、
+    「旧レギュレーション時代の重みを下げる」設計はチューニング中も維持される。
+    """
+    tscv = TimeSeriesSplit(n_splits=CV_N_SPLITS)
+
+    param_dist = {
+        "n_estimators": randint(100, 501),       # 100〜500
+        "max_depth": randint(3, 7),               # 3〜6
+        "learning_rate": uniform(0.01, 0.09),    # 0.01〜0.10
+        "subsample": uniform(0.6, 0.4),          # 0.6〜1.0
+        "colsample_bytree": uniform(0.6, 0.4),   # 0.6〜1.0
+        "min_child_weight": randint(1, 8),        # 1〜7
+    }
+
+    base_model = xgb.XGBRegressor(
+        objective="reg:squarederror",
+        tree_method="hist",
+        random_state=XGBOOST_RANDOM_STATE,
+    )
+
+    search = RandomizedSearchCV(
+        estimator=base_model,
+        param_distributions=param_dist,
+        n_iter=n_iter,
+        scoring="neg_mean_absolute_error",
+        cv=tscv,
+        random_state=XGBOOST_RANDOM_STATE,
+        n_jobs=-1,
+        verbose=verbose,
+    )
+
+    search.fit(X, y, sample_weight=sample_weights)
+    return search.best_params_
 
 
 def save_model(model: xgb.XGBRegressor, path: str = MODEL_SAVE_PATH) -> None:
