@@ -21,14 +21,14 @@ from src.constants import (
 
 def extract_qualifying_features(quali_session: fastf1.core.Session) -> pd.DataFrame:
     """
-    予選結果から quali_pos と gap_to_pole を返す。
-    columns: DriverNumber, Abbreviation, quali_pos, gap_to_pole
+    予選結果から quali_pos・gap_to_pole・constructor を返す。
+    columns: DriverNumber, Abbreviation, quali_pos, gap_to_pole, constructor
     """
     results = quali_session.results[
-        ["DriverNumber", "Abbreviation", "Position", "Q1", "Q2", "Q3"]
+        ["DriverNumber", "Abbreviation", "Position", "Q1", "Q2", "Q3", "TeamName"]
     ].copy()
     results["DriverNumber"] = results["DriverNumber"].astype(str)
-    results = results.rename(columns={"Position": "quali_pos"})
+    results = results.rename(columns={"Position": "quali_pos", "TeamName": "constructor"})
     # 予選不出走（DNS/DSQ等）のドライバーはPositionがNaNになる。
     # quali_posが使えない行は特徴量として意味がないため除外する。
     excluded = results[results["quali_pos"].isna()]["Abbreviation"].tolist()
@@ -41,7 +41,7 @@ def extract_qualifying_features(quali_session: fastf1.core.Session) -> pd.DataFr
     results["gap_to_pole"] = results.apply(
         lambda row: _compute_gap_to_pole_seconds(row, pole_time_seconds), axis=1
     )
-    return results[["DriverNumber", "Abbreviation", "quali_pos", "gap_to_pole"]]
+    return results[["DriverNumber", "Abbreviation", "quali_pos", "gap_to_pole", "constructor"]]
 
 
 def _get_pole_time_seconds(quali_results: pd.DataFrame) -> float:
@@ -155,6 +155,7 @@ def build_feature_table_for_session(
     df = df.dropna(subset=[TARGET_COLUMN])
     df[TARGET_COLUMN] = df[TARGET_COLUMN].astype(int)
 
+    # constructor はメタ列として保持する（constructor_avg_finish の計算に使用）
     return df
 
 
@@ -187,4 +188,62 @@ def build_training_dataset(session_pairs: list[dict]) -> pd.DataFrame:
     combined = pd.concat(feature_tables, ignore_index=True)
 
     # 時系列順に並べる（TimeSeriesSplitのために年・ラウンドの昇順が必要）
-    return combined.sort_values(["year", "round_number"]).reset_index(drop=True)
+    combined = combined.sort_values(["year", "round_number"]).reset_index(drop=True)
+
+    return compute_constructor_avg_finish(combined)
+
+
+def compute_constructor_avg_finish(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    コンストラクターの過去レース平均フィニッシュ順位を特徴量として追加する。
+
+    各レースについて「そのレース以前」のレース結果から
+    コンストラクターの平均フィニッシュ順位（2ドライバー分の平均）を計算する。
+    データリーク防止のため、そのレース自身は含めない。
+    開幕戦など過去データがない場合は NaN（XGBoost が内部処理）。
+    """
+    df = df.copy()
+
+    # 1. レースごとのコンストラクター平均フィニッシュ（2ドライバーを平均）
+    race_avg = (
+        df.groupby(["year", "round_number", "constructor"])["finish_pos"]
+        .mean()
+        .reset_index(name="race_constructor_avg")
+        .sort_values(["year", "round_number"])
+    )
+
+    # 2. コンストラクターごとに shift(1) + expanding mean で「過去全レース」の累積平均を計算
+    #    shift(1) でそのレース自身を除外し、expanding で開幕からの全履歴を使う
+    race_avg["constructor_avg_finish"] = (
+        race_avg.groupby("constructor")["race_constructor_avg"]
+        .transform(lambda x: x.shift(1).expanding().mean())
+    )
+
+    # 3. 元の DataFrame に merge（ドライバー単位で同じレースの値が入る）
+    df = df.merge(
+        race_avg[["year", "round_number", "constructor", "constructor_avg_finish"]],
+        on=["year", "round_number", "constructor"],
+        how="left",
+    )
+
+    return df
+
+
+def add_constructor_avg_finish_for_prediction(
+    race_df: pd.DataFrame,
+    training_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    予測時用: 学習データ全体からコンストラクターの平均フィニッシュ順位を計算し
+    race_df に追加する。
+
+    学習データは「現時点までの全既知レース」なので、
+    そのコンストラクターの最新の実力推定値として使える。
+    """
+    constructor_form = (
+        training_df.groupby("constructor")["finish_pos"]
+        .mean()
+        .reset_index()
+        .rename(columns={"finish_pos": "constructor_avg_finish"})
+    )
+    return race_df.merge(constructor_form, on="constructor", how="left")

@@ -19,7 +19,10 @@ from src.constants import (
     TRAINING_START_YEAR,
 )
 from src.evaluate import build_evaluation_report, format_evaluation_report_for_display
-from src.features import build_feature_table_for_session
+from src.features import (
+    add_constructor_avg_finish_for_prediction,
+    build_feature_table_for_session,
+)
 from src.fetch import (
     configure_fastf1_cache,
     get_event_info,
@@ -52,7 +55,8 @@ def get_feature_columns(df: pd.DataFrame) -> list[str]:
     メタ列（year, round, driver）と目的変数を除外する必要があるため、
     除外リストで明示的に管理する。
     """
-    non_feature_cols = {"year", "round_number", "driver", TARGET_COLUMN}
+    # constructor は文字列メタ列。constructor_avg_finish の計算に使うが特徴量ではない
+    non_feature_cols = {"year", "round_number", "driver", "constructor", TARGET_COLUMN}
     return [col for col in df.columns if col not in non_feature_cols]
 
 
@@ -270,6 +274,9 @@ def main() -> None:
             race_df = build_feature_table_for_session(
                 race_session, quali_session, selected_year, selected_round
             )
+            # 学習データからコンストラクターの平均フィニッシュを付与する
+            train_df = load_training_data_from_csv()
+            race_df = add_constructor_avg_finish_for_prediction(race_df, train_df)
         except Exception as error:
             st.error(f"特徴量テーブルの構築に失敗しました: {error}")
             return
