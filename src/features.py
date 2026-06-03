@@ -3,6 +3,8 @@
 FastF1のSessionオブジェクトから XGBoost に渡せる数値テーブルを作る。
 """
 
+from pathlib import Path
+
 import fastf1
 import numpy as np
 import pandas as pd
@@ -11,6 +13,7 @@ from src.constants import (
     CIRCUIT_TYPE_ENCODING,
     CIRCUIT_TYPE_MAP,
     CIRCUIT_TYPE_UNKNOWN_FALLBACK,
+    DATA_RAW_DIR,
     MAX_GAP_TO_POLE_SECONDS,
     TARGET_COLUMN,
     WEATHER_EARLY_SAMPLE_COUNT,
@@ -73,7 +76,9 @@ def _compute_gap_to_pole_seconds(row: pd.Series, pole_time_seconds: float) -> fl
 
 
 def _timedelta_to_seconds(td) -> float:
-    """pandas Timedelta または datetime.timedelta を秒（float）に変換する。"""
+    """pandas Timedelta / datetime.timedelta / float(秒) を秒（float）に変換する。"""
+    if isinstance(td, (int, float)):
+        return float(td)
     return pd.Timedelta(td).total_seconds()
 
 
@@ -247,3 +252,131 @@ def add_constructor_avg_finish_for_prediction(
         .rename(columns={"finish_pos": "constructor_avg_finish"})
     )
     return race_df.merge(constructor_form, on="constructor", how="left")
+
+
+# ---------- data/raw/ parquetからの特徴量構築（ネットワーク不要版） ----------
+
+def build_feature_table_from_raw(
+    race_results: pd.DataFrame,
+    race_weather: pd.DataFrame | None,
+    quali_results: pd.DataFrame,
+    country: str,
+    year: int,
+    round_number: int,
+) -> pd.DataFrame:
+    """
+    data/raw/ のparquetから読んだDataFrameで1レース分の特徴量テーブルを作る。
+    build_feature_table_for_session のDataFrame版。
+    Q1/Q2/Q3 はparquet保存時にfloat(秒)へ変換済みのため、
+    _timedelta_to_seconds が float をそのまま返す。
+    """
+    quali_features = _extract_qualifying_features_from_df(quali_results)
+    finish_positions = _extract_finish_positions_from_df(race_results)
+
+    weather = _extract_weather_summary_from_df(race_weather)
+    circuit_type_encoded = encode_circuit_type(country)
+
+    df = finish_positions.merge(quali_features, on=["DriverNumber", "Abbreviation"], how="inner")
+    df["air_temp"] = weather["air_temp"]
+    df["rain"] = weather["rain"]
+    df["circuit_type_encoded"] = circuit_type_encoded
+    df["year"] = year
+    df["round_number"] = round_number
+
+    df = df.rename(columns={"Abbreviation": "driver"})
+    df = df.drop(columns=["DriverNumber"])
+    df = df.dropna(subset=[TARGET_COLUMN])
+    df[TARGET_COLUMN] = df[TARGET_COLUMN].astype(int)
+    return df
+
+
+def _extract_qualifying_features_from_df(quali_results: pd.DataFrame) -> pd.DataFrame:
+    results = quali_results[
+        ["DriverNumber", "Abbreviation", "Position", "Q1", "Q2", "Q3", "TeamName"]
+    ].copy()
+    results["DriverNumber"] = results["DriverNumber"].astype(str)
+    results = results.rename(columns={"Position": "quali_pos", "TeamName": "constructor"})
+
+    excluded = results[results["quali_pos"].isna()]["Abbreviation"].tolist()
+    if excluded:
+        print(f"[INFO] Excluded drivers with no qualifying position: {excluded}")
+    results = results.dropna(subset=["quali_pos"])
+    results["quali_pos"] = results["quali_pos"].astype(int)
+
+    pole_time = _get_pole_time_seconds(results)
+    results["gap_to_pole"] = results.apply(
+        lambda row: _compute_gap_to_pole_seconds(row, pole_time), axis=1
+    )
+    return results[["DriverNumber", "Abbreviation", "quali_pos", "gap_to_pole", "constructor"]]
+
+
+def _extract_finish_positions_from_df(race_results: pd.DataFrame) -> pd.DataFrame:
+    results = race_results[["DriverNumber", "Abbreviation", "Position"]].copy()
+    results["DriverNumber"] = results["DriverNumber"].astype(str)
+    return results.rename(columns={"Position": "finish_pos"})[
+        ["DriverNumber", "Abbreviation", "finish_pos"]
+    ]
+
+
+def _extract_weather_summary_from_df(weather_df: pd.DataFrame | None) -> dict:
+    if weather_df is None or weather_df.empty:
+        return {"air_temp": np.nan, "rain": 0}
+    early = weather_df.head(WEATHER_EARLY_SAMPLE_COUNT)
+    return {
+        "air_temp": early["AirTemp"].mean(),
+        "rain": int(early["Rainfall"].any()),
+    }
+
+
+def build_training_dataset_from_raw(raw_dir: str = DATA_RAW_DIR) -> pd.DataFrame:
+    """
+    data/raw/ のparquetファイルから学習データセット全体を構築する。
+    ネットワーク不要・sleepなし。特徴量を変更したときに再実行する。
+    """
+    raw_path = Path(raw_dir)
+    event_files = sorted(raw_path.glob("*_event.parquet"))
+
+    if not event_files:
+        raise FileNotFoundError(
+            f"data/raw/ にparquetが見つかりません。先に build_raw.py を実行してください。"
+        )
+
+    feature_tables = []
+    for event_file in event_files:
+        prefix = str(event_file)[: -len("_event.parquet")]
+        race_results_path = Path(f"{prefix}_race_results.parquet")
+        quali_results_path = Path(f"{prefix}_quali_results.parquet")
+        weather_path = Path(f"{prefix}_race_weather.parquet")
+
+        if not race_results_path.exists() or not quali_results_path.exists():
+            continue
+
+        try:
+            event = pd.read_parquet(event_file)
+            year = int(event["year"].iloc[0])
+            round_number = int(event["round_number"].iloc[0])
+            country = str(event["country"].iloc[0])
+
+            race_results = pd.read_parquet(race_results_path)
+            quali_results = pd.read_parquet(quali_results_path)
+            race_weather = pd.read_parquet(weather_path) if weather_path.exists() else None
+
+            table = build_feature_table_from_raw(
+                race_results=race_results,
+                race_weather=race_weather,
+                quali_results=quali_results,
+                country=country,
+                year=year,
+                round_number=round_number,
+            )
+            if not table.empty:
+                feature_tables.append(table)
+        except Exception as error:
+            print(f"[SKIP] Feature build failed for {event_file.name}: {error}")
+
+    if not feature_tables:
+        raise ValueError("有効なセッションデータが1件も得られませんでした。")
+
+    combined = pd.concat(feature_tables, ignore_index=True)
+    combined = combined.sort_values(["year", "round_number"]).reset_index(drop=True)
+    return compute_constructor_avg_finish(combined)

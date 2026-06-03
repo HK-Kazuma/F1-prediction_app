@@ -128,6 +128,7 @@ FETCH_MAX_RETRIES = 3
 # ---------- パス ----------
 
 DATA_CACHE_DIR = "data/cache"
+DATA_RAW_DIR = "data/raw"
 DATA_PROCESSED_DIR = "data/processed"
 TRAINING_DATA_PATH = "data/processed/training_features.csv"
 MODEL_SAVE_PATH = "data/processed/xgboost_model.json"
