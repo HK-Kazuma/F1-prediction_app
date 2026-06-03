@@ -118,15 +118,29 @@ def render_feature_importance_section(model, feature_cols: list[str]) -> None:
 
 
 def render_prediction_table(predictions_df: pd.DataFrame) -> None:
-    """予測順位表を描画する。"""
+    """予測順位表を描画する。実際の結果がある場合は結果列も表示する。"""
+    has_actual = (
+        TARGET_COLUMN in predictions_df.columns
+        and predictions_df[TARGET_COLUMN].notna().all()
+    )
+
+    cols = ["predicted_rank", "driver", "quali_pos"]
+    rename = {
+        "predicted_rank": "予測順位",
+        "driver": "ドライバー",
+        "quali_pos": "グリッド",
+    }
+
+    if has_actual:
+        cols.append(TARGET_COLUMN)
+        rename[TARGET_COLUMN] = "実際の順位"
+
+    cols.append("predicted_pos_raw")
+    rename["predicted_pos_raw"] = "スコア（低いほど上位）"
+
     display_df = (
-        predictions_df[["predicted_rank", "driver", "quali_pos", "predicted_pos_raw"]]
-        .rename(columns={
-            "predicted_rank": "予測順位",
-            "driver": "ドライバー",
-            "quali_pos": "グリッド",
-            "predicted_pos_raw": "スコア（低いほど上位）",
-        })
+        predictions_df[cols]
+        .rename(columns=rename)
         .head(PREDICTION_TOP_N)
     )
     st.dataframe(display_df, use_container_width=True, hide_index=True)
