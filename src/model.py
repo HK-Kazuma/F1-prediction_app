@@ -136,10 +136,14 @@ def get_feature_importance_table(
     model: xgb.XGBRegressor,
     feature_names: list[str],
 ) -> pd.DataFrame:
-    """特徴量重要度をDataFrameで返す（Streamlitグラフ描画・学習目的の可視化に使う）。"""
+    """特徴量重要度をDataFrameで返す（Streamlitグラフ描画・学習目的の可視化に使う）。
+    モデルに保存された特徴量名を優先する。呼び出し元と特徴量数が食い違うときのフェイルセーフ。
+    """
     importances = model.feature_importances_
+    booster_names = model.get_booster().feature_names
+    names = booster_names if booster_names is not None else feature_names
     return (
-        pd.DataFrame({"feature": feature_names, "importance": importances})
+        pd.DataFrame({"feature": names, "importance": importances})
         .sort_values("importance", ascending=False)
         .reset_index(drop=True)
     )

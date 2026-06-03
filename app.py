@@ -75,14 +75,19 @@ def load_training_data_from_csv() -> pd.DataFrame:
 def load_or_train_model(training_data_path: str) -> object:
     """
     保存済みモデルがあればロード、なければ学習して保存する。
-    st.cache_resourceでモデルオブジェクトをセッション間で共有する。
-    training_data_pathをキーにすることでデータが変わったときにキャッシュが無効化される。
+    モデルの特徴量がCSVと一致しない場合（特徴量変更後など）は自動再学習する。
     """
-    if Path(MODEL_SAVE_PATH).exists():
-        return load_model()
-
     df = pd.read_csv(training_data_path)
     feature_cols = get_feature_columns(df)
+
+    if Path(MODEL_SAVE_PATH).exists():
+        candidate = load_model()
+        booster_names = candidate.get_booster().feature_names
+        if booster_names is not None and list(booster_names) == feature_cols:
+            return candidate
+        # 特徴量が変わっているので保存済みモデルを破棄して再学習する
+        Path(MODEL_SAVE_PATH).unlink()
+
     X = df[feature_cols]
     y = df[TARGET_COLUMN]
     weights = compute_era_sample_weights(df["year"])
