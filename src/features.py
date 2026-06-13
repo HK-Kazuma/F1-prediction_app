@@ -86,14 +86,14 @@ def _timedelta_to_seconds(td) -> float:
 
 def extract_finish_positions(race_session: fastf1.core.Session) -> pd.DataFrame:
     """
-    決勝結果から finish_pos（目的変数）を返す。
+    決勝結果から finish_pos（目的変数）と GridPosition を返す。
     DNF/DSQはNaNになるためこの段階では保持し、build_feature_tableで除去する。
-    columns: DriverNumber, Abbreviation, finish_pos
+    columns: DriverNumber, Abbreviation, finish_pos, GridPosition
     """
-    results = race_session.results[["DriverNumber", "Abbreviation", "Position"]].copy()
+    results = race_session.results[["DriverNumber", "Abbreviation", "Position", "GridPosition"]].copy()
     results["DriverNumber"] = results["DriverNumber"].astype(str)
     results = results.rename(columns={"Position": "finish_pos"})
-    return results[["DriverNumber", "Abbreviation", "finish_pos"]]
+    return results[["DriverNumber", "Abbreviation", "finish_pos", "GridPosition"]]
 
 
 # ---------- 天候特徴量 ----------
@@ -146,6 +146,11 @@ def build_feature_table_for_session(
 
     # 決勝結果を基準にinner joinすることで、予選データがないドライバーを除外する
     df = finish_positions.merge(quali_features, on=["DriverNumber", "Abbreviation"], how="inner")
+
+    # ペナルティでグリッドが変わった場合にその差を特徴量にする。
+    # GridPosition - quali_pos > 0 はペナルティ降格、< 0 は他者のペナルティで繰り上がりを意味する。
+    df["grid_penalty"] = df["GridPosition"] - df["quali_pos"]
+    df = df.drop(columns=["GridPosition"])
 
     df["air_temp"] = weather["air_temp"]
     df["rain"] = weather["rain"]
@@ -277,6 +282,10 @@ def build_feature_table_from_raw(
     circuit_type_encoded = encode_circuit_type(country)
 
     df = finish_positions.merge(quali_features, on=["DriverNumber", "Abbreviation"], how="inner")
+
+    df["grid_penalty"] = df["GridPosition"] - df["quali_pos"]
+    df = df.drop(columns=["GridPosition"])
+
     df["air_temp"] = weather["air_temp"]
     df["rain"] = weather["rain"]
     df["circuit_type_encoded"] = circuit_type_encoded
@@ -311,10 +320,10 @@ def _extract_qualifying_features_from_df(quali_results: pd.DataFrame) -> pd.Data
 
 
 def _extract_finish_positions_from_df(race_results: pd.DataFrame) -> pd.DataFrame:
-    results = race_results[["DriverNumber", "Abbreviation", "Position"]].copy()
+    results = race_results[["DriverNumber", "Abbreviation", "Position", "GridPosition"]].copy()
     results["DriverNumber"] = results["DriverNumber"].astype(str)
     return results.rename(columns={"Position": "finish_pos"})[
-        ["DriverNumber", "Abbreviation", "finish_pos"]
+        ["DriverNumber", "Abbreviation", "finish_pos", "GridPosition"]
     ]
 
 

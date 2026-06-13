@@ -321,7 +321,7 @@ def main() -> None:
             st.divider()
             render_evaluation_section(
                 y_true=race_df[TARGET_COLUMN],
-                y_pred=predicted_positions,
+                y_pred=race_df["predicted_pos_raw"].values,
                 quali_positions=race_df["quali_pos"],
             )
 
