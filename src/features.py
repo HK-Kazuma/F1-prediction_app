@@ -14,6 +14,7 @@ from src.constants import (
     CIRCUIT_TYPE_MAP,
     CIRCUIT_TYPE_UNKNOWN_FALLBACK,
     DATA_RAW_DIR,
+    DRIVER_DNF_RATES_PATH,
     MAX_GAP_TO_POLE_SECONDS,
     TARGET_COLUMN,
     WEATHER_EARLY_SAMPLE_COUNT,
@@ -259,6 +260,39 @@ def add_constructor_avg_finish_for_prediction(
     return race_df.merge(constructor_form, on="constructor", how="left")
 
 
+def compute_driver_avg_finish(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    ドライバーの過去レース平均フィニッシュ順位を特徴量として追加する。
+
+    constructor_avg_finish と同じ設計で、ドライバー単位で集計する。
+    shift(1) + expanding でそのレース自身を除外してデータリークを防ぐ。
+    開幕戦など履歴がない場合は NaN（XGBoost が内部処理）。
+    """
+    df = df.copy()
+    df["driver_avg_finish"] = (
+        df.groupby("driver")["finish_pos"]
+        .transform(lambda x: x.shift(1).expanding().mean())
+    )
+    return df
+
+
+def add_driver_avg_finish_for_prediction(
+    race_df: pd.DataFrame,
+    training_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    予測時用: 学習データ全体からドライバーの平均フィニッシュ順位を計算し
+    race_df に追加する。
+    """
+    driver_form = (
+        training_df.groupby("driver")["finish_pos"]
+        .mean()
+        .reset_index()
+        .rename(columns={"finish_pos": "driver_avg_finish"})
+    )
+    return race_df.merge(driver_form, on="driver", how="left")
+
+
 # ---------- data/raw/ parquetからの特徴量構築（ネットワーク不要版） ----------
 
 def build_feature_table_from_raw(
@@ -388,4 +422,81 @@ def build_training_dataset_from_raw(raw_dir: str = DATA_RAW_DIR) -> pd.DataFrame
 
     combined = pd.concat(feature_tables, ignore_index=True)
     combined = combined.sort_values(["year", "round_number"]).reset_index(drop=True)
-    return compute_constructor_avg_finish(combined)
+    combined = compute_constructor_avg_finish(combined)
+    return combined
+
+
+# ---------- ドライバーDNF率 ----------
+
+def _load_all_dnf_records(raw_dir: str) -> pd.DataFrame:
+    """
+    全race_resultsから (year, round_number, driver, is_dnf) を収集する。
+    DNFドライバーは学習データから除外されているためraw parquetから直接読む。
+
+    完走扱いのStatus: "Finished" / "Lapped" / "+N Laps"
+    それ以外（Engine, Accident, Gearbox 等）はすべてDNFとして扱う。
+    Position.isna() は DNS/Withdrew など極少数しか拾えないため使わない。
+    """
+    CLASSIFIED = {"Finished", "Lapped"}
+
+    records = []
+    for parquet in sorted(Path(raw_dir).glob("*_race_results.parquet")):
+        parts = parquet.stem.split("_")
+        year, round_num = int(parts[0]), int(parts[1])
+        race_df = pd.read_parquet(parquet)[["Abbreviation", "Status"]]
+        race_df["year"] = year
+        race_df["round_number"] = round_num
+        is_classified = (
+            race_df["Status"].isin(CLASSIFIED)
+            | race_df["Status"].str.match(r"^\+\d", na=False)
+        )
+        race_df["is_dnf"] = (~is_classified).astype(int)
+        records.append(race_df[["year", "round_number", "Abbreviation", "is_dnf"]])
+
+    all_records = pd.concat(records, ignore_index=True)
+    return (
+        all_records.rename(columns={"Abbreviation": "driver"})
+        .sort_values(["year", "round_number"])
+        .reset_index(drop=True)
+    )
+
+
+def compute_driver_dnf_rate(df: pd.DataFrame, raw_dir: str) -> pd.DataFrame:
+    """
+    ドライバーの過去レースのDNF率（0.0〜1.0）を特徴量として追加する。
+
+    データリーク防止のため shift(1) + expanding でそのレース自身を含めない。
+    初戦など履歴がない場合は NaN（XGBoost が内部処理）。
+    """
+    all_dnf = _load_all_dnf_records(raw_dir)
+    all_dnf["driver_dnf_rate"] = (
+        all_dnf.groupby("driver")["is_dnf"]
+        .transform(lambda x: x.shift(1).expanding().mean())
+    )
+    dnf_rates = all_dnf[["year", "round_number", "driver", "driver_dnf_rate"]]
+    return df.merge(dnf_rates, on=["year", "round_number", "driver"], how="left")
+
+
+def build_driver_dnf_rate_snapshot(raw_dir: str) -> pd.DataFrame:
+    """
+    予測時用: 全履歴からドライバーの累積DNF率を計算して返す。
+    build_features.py が呼び出してCSVに保存し、app.py が予測時に読む。
+    """
+    all_dnf = _load_all_dnf_records(raw_dir)
+    return (
+        all_dnf.groupby("driver")["is_dnf"]
+        .mean()
+        .reset_index()
+        .rename(columns={"is_dnf": "driver_dnf_rate"})
+    )
+
+
+def add_driver_dnf_rate_for_prediction(
+    race_df: pd.DataFrame,
+    driver_dnf_rates: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    予測時用: driver_dnf_rates（build_driver_dnf_rate_snapshot の出力）を
+    race_df に付与する。未知ドライバーは NaN のまま残す（XGBoost が内部処理）。
+    """
+    return race_df.merge(driver_dnf_rates, on="driver", how="left")

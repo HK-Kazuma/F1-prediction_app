@@ -293,7 +293,6 @@ def main() -> None:
             race_df = build_feature_table_for_session(
                 race_session, quali_session, selected_year, selected_round
             )
-            # 学習データからコンストラクターの平均フィニッシュを付与する
             train_df = load_training_data_from_csv()
             race_df = add_constructor_avg_finish_for_prediction(race_df, train_df)
         except Exception as error:
