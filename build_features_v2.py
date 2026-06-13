@@ -16,7 +16,7 @@ import time
 from pathlib import Path
 
 from src.constants import DATA_PROCESSED_DIR, DATA_RAW_DIR, TRAINING_V2_DATA_PATH
-from src.features import build_training_dataset_from_raw
+from src.features import build_training_dataset_from_raw_v2
 
 
 def main() -> None:
@@ -31,10 +31,7 @@ def main() -> None:
     print(f"Building Phase 2 features from {event_count} rounds ({fp3_count} with FP3)...")
     start = time.time()
 
-    # Phase 2 では FP3 long run pace を追加する
-    # TODO: build_training_dataset_from_raw_v2() を実装してここで呼ぶ
-    #       現時点では Phase 1 と同じ特徴量セットで動作確認用として使う
-    training_df = build_training_dataset_from_raw(str(raw_dir))
+    training_df = build_training_dataset_from_raw_v2(str(raw_dir))
 
     Path(DATA_PROCESSED_DIR).mkdir(parents=True, exist_ok=True)
     training_df.to_csv(TRAINING_V2_DATA_PATH, index=False)
@@ -42,11 +39,9 @@ def main() -> None:
     elapsed = time.time() - start
     print(f"Done in {elapsed:.1f}s.")
     print(f"Rows: {len(training_df)} | Columns: {len(training_df.columns)}")
+    fp3_coverage = (training_df["fp3_long_run_pace"].notna().sum() / len(training_df) * 100)
+    print(f"FP3 coverage: {fp3_coverage:.0f}% of rows have long run pace data")
     print(f"Saved: {TRAINING_V2_DATA_PATH}")
-
-    if fp3_count == 0:
-        print("\n[INFO] FP3 data not found. Run: python build_raw.py --fp3")
-        print("       After FP3 fetch completes, re-run this script to include long run pace.")
 
 
 if __name__ == "__main__":

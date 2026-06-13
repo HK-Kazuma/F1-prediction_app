@@ -140,6 +140,11 @@ MODEL_SAVE_PATH = "data/processed/xgboost_model.json"
 TRAINING_V2_DATA_PATH = "data/processed/training_features_v2.csv"
 MODEL_V2_SAVE_PATH = "data/processed/xgboost_model_v2.json"
 
+# ドライバー・コンストラクターのローリング平均フィニッシュのウィンドウサイズ。
+# 全履歴の展開平均より直近フォームを重視しつつ、
+# ウィンドウが小さすぎると1レースの異常値に過敏になるため5戦に設定する。
+ROLLING_AVG_WINDOW = 5
+
 # FP3は laps=True で取得するため1セッションあたりのサブリクエストが多い。
 # 500コール/時の上限を守るため通常より長めの待機を設ける。
 FETCH_SLEEP_SECONDS_FP3 = 180

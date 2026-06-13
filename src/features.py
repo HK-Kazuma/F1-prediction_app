@@ -16,6 +16,7 @@ from src.constants import (
     DATA_RAW_DIR,
     DRIVER_DNF_RATES_PATH,
     MAX_GAP_TO_POLE_SECONDS,
+    ROLLING_AVG_WINDOW,
     TARGET_COLUMN,
     WEATHER_EARLY_SAMPLE_COUNT,
 )
@@ -260,6 +261,101 @@ def add_constructor_avg_finish_for_prediction(
     return race_df.merge(constructor_form, on="constructor", how="left")
 
 
+def compute_driver_rolling_avg_finish(
+    df: pd.DataFrame,
+    window: int = ROLLING_AVG_WINDOW,
+) -> pd.DataFrame:
+    """
+    ドライバーの直近N戦の平均フィニッシュ順位を特徴量として追加する。
+
+    全履歴の展開平均（compute_driver_avg_finish）と違い直近フォームを重視する。
+    shift(1)でそのレース自身を除外し、データリークを防ぐ。
+    min_periods=1 にして window 未満でも計算する（序盤戦でNaNにならない）。
+    """
+    df = df.copy()
+    df["driver_rolling_avg_finish"] = (
+        df.groupby("driver")["finish_pos"]
+        .transform(lambda x: x.shift(1).rolling(window, min_periods=1).mean())
+    )
+    return df
+
+
+def compute_constructor_rolling_avg_finish(
+    df: pd.DataFrame,
+    window: int = ROLLING_AVG_WINDOW,
+) -> pd.DataFrame:
+    """
+    コンストラクターの直近N戦の平均フィニッシュ順位を特徴量として追加する。
+
+    compute_constructor_avg_finish（全履歴展開平均）の直近N戦版。
+    コンストラクターの開発トレンドや直近の信頼性を捉える。
+    shift(1)でそのレース自身を除外し、データリークを防ぐ。
+    """
+    df = df.copy()
+
+    race_avg = (
+        df.groupby(["year", "round_number", "constructor"])["finish_pos"]
+        .mean()
+        .reset_index(name="race_constructor_avg")
+        .sort_values(["year", "round_number"])
+    )
+
+    race_avg["constructor_rolling_avg_finish"] = (
+        race_avg.groupby("constructor")["race_constructor_avg"]
+        .transform(lambda x: x.shift(1).rolling(window, min_periods=1).mean())
+    )
+
+    df = df.merge(
+        race_avg[["year", "round_number", "constructor", "constructor_rolling_avg_finish"]],
+        on=["year", "round_number", "constructor"],
+        how="left",
+    )
+    return df
+
+
+def add_driver_rolling_avg_finish_for_prediction(
+    race_df: pd.DataFrame,
+    training_df: pd.DataFrame,
+    window: int = ROLLING_AVG_WINDOW,
+) -> pd.DataFrame:
+    """
+    予測時用: 学習データの直近N戦からドライバーの平均フィニッシュ順位を計算し race_df に追加する。
+    未知ドライバーは NaN のまま残す（XGBoost が内部処理）。
+    """
+    driver_recent = (
+        training_df.sort_values(["year", "round_number"])
+        .groupby("driver")["finish_pos"]
+        .apply(lambda x: x.tail(window).mean())
+        .reset_index()
+        .rename(columns={"finish_pos": "driver_rolling_avg_finish"})
+    )
+    return race_df.merge(driver_recent, on="driver", how="left")
+
+
+def add_constructor_rolling_avg_finish_for_prediction(
+    race_df: pd.DataFrame,
+    training_df: pd.DataFrame,
+    window: int = ROLLING_AVG_WINDOW,
+) -> pd.DataFrame:
+    """
+    予測時用: 学習データの直近N戦からコンストラクターの平均フィニッシュ順位を計算し race_df に追加する。
+    未知コンストラクターは NaN のまま残す（XGBoost が内部処理）。
+    """
+    race_avg = (
+        training_df.groupby(["year", "round_number", "constructor"])["finish_pos"]
+        .mean()
+        .reset_index(name="race_constructor_avg")
+        .sort_values(["year", "round_number"])
+    )
+    constructor_recent = (
+        race_avg.groupby("constructor")["race_constructor_avg"]
+        .apply(lambda x: x.tail(window).mean())
+        .reset_index()
+        .rename(columns={"race_constructor_avg": "constructor_rolling_avg_finish"})
+    )
+    return race_df.merge(constructor_recent, on="constructor", how="left")
+
+
 def compute_driver_avg_finish(df: pd.DataFrame) -> pd.DataFrame:
     """
     ドライバーの過去レース平均フィニッシュ順位を特徴量として追加する。
@@ -423,6 +519,169 @@ def build_training_dataset_from_raw(raw_dir: str = DATA_RAW_DIR) -> pd.DataFrame
     combined = pd.concat(feature_tables, ignore_index=True)
     combined = combined.sort_values(["year", "round_number"]).reset_index(drop=True)
     combined = compute_constructor_avg_finish(combined)
+    return combined
+
+
+# ---------- FP3 Long Run Pace ----------
+
+# FP3でlong runとみなすスティントの最小ラップ数。
+# 3周未満はアタックラップや短いセットアップ走行と判断してlong runから除外する。
+# 2018-2020年はIsAccurateの記録が不完全でスティントが短く見えるため小さめに設定する。
+_FP3_MIN_LONG_RUN_LAPS = 3
+
+
+def extract_fp3_long_run_pace(fp3_laps: pd.DataFrame) -> pd.DataFrame:
+    """
+    FP3のlong run pace（レースペース指標）をドライバーごとに返す。
+
+    long run = スティント内で5周以上の連続走行。
+    チームがFP3でレースシミュレーションを行う部分を捉える特徴量。
+
+    処理フロー:
+      1. 正確に計測されたラップのみ残す (IsAccurate=True)
+      2. ピットイン/アウトラップを除外（通常より大幅に遅い）
+      3. イエローフラグ・SC下のラップを除外 (TrackStatus != '1')
+      4. スティントごとに周回数を集計し、_FP3_MIN_LONG_RUN_LAPS周未満は除外
+      5. 各ドライバーのlong runラップの中央値をペースとして採用
+      6. 最速ドライバーからのギャップ（秒）に変換（絶対タイムはサーキット依存なので相対化）
+
+    Returns: DataFrame with columns [Driver, fp3_long_run_pace]
+             fp3_long_run_pace = ドライバーの中央long runラップ - セッション最速中央ラップ（秒）
+    """
+    laps = fp3_laps.copy()
+
+    if "LapTime" not in laps.columns or laps.empty:
+        return pd.DataFrame(columns=["Driver", "fp3_long_run_pace"])
+
+    # IsAccurate=Falseのラップ（計測ミス・中断）は除外するが、
+    # TrueとNaN（古いシーズンは記録なし）は残す。
+    # 2018-2020年はIsAccurate=Trueの割合が極端に低いため True のみに絞ると
+    # サンプル数が不足してしまう。
+    if "IsAccurate" in laps.columns:
+        laps = laps[laps["IsAccurate"] != False]
+
+    if "PitInTime" in laps.columns:
+        laps = laps[laps["PitInTime"].isna()]
+    if "PitOutTime" in laps.columns:
+        laps = laps[laps["PitOutTime"].isna()]
+
+    if "TrackStatus" in laps.columns:
+        laps = laps[laps["TrackStatus"].astype(str) == "1"]
+
+    laps = laps[laps["LapTime"].notna() & (laps["LapTime"] > 0)]
+
+    if laps.empty:
+        return pd.DataFrame(columns=["Driver", "fp3_long_run_pace"])
+
+    # Stint列がなければLapNumberの連続性からスティントを推定する
+    if "Stint" not in laps.columns or laps["Stint"].isna().all():
+        laps = laps.sort_values(["Driver", "LapNumber"])
+        laps["Stint"] = (
+            laps.groupby("Driver")["LapNumber"]
+            .transform(lambda x: (x.diff().fillna(1) != 1).cumsum())
+        )
+
+    stint_len = (
+        laps.groupby(["Driver", "Stint"])["LapTime"]
+        .count()
+        .reset_index(name="stint_laps")
+    )
+    long_stints = stint_len[stint_len["stint_laps"] >= _FP3_MIN_LONG_RUN_LAPS][["Driver", "Stint"]]
+
+    if long_stints.empty:
+        # long runが一件もない場合（雨天中断等）は全accurate lapsで代替する
+        pace_df = (
+            laps.groupby("Driver")["LapTime"]
+            .median()
+            .reset_index(name="fp3_pace_seconds")
+        )
+    else:
+        long_run_laps = laps.merge(long_stints, on=["Driver", "Stint"])
+        pace_df = (
+            long_run_laps.groupby("Driver")["LapTime"]
+            .median()
+            .reset_index(name="fp3_pace_seconds")
+        )
+
+    if pace_df.empty:
+        return pd.DataFrame(columns=["Driver", "fp3_long_run_pace"])
+
+    best_pace = pace_df["fp3_pace_seconds"].min()
+    pace_df["fp3_long_run_pace"] = pace_df["fp3_pace_seconds"] - best_pace
+    return pace_df[["Driver", "fp3_long_run_pace"]]
+
+
+def build_training_dataset_from_raw_v2(raw_dir: str = DATA_RAW_DIR) -> pd.DataFrame:
+    """
+    Phase 2 用学習データ構築。Phase 1 の特徴量に加えて FP3 long run pace を追加する。
+
+    FP3データが存在しないラウンドは fp3_long_run_pace = NaN。
+    XGBoostは内部でNaNを欠損として処理するため、FP3データが少なくても学習できる。
+    """
+    raw_path = Path(raw_dir)
+    event_files = sorted(raw_path.glob("*_event.parquet"))
+
+    if not event_files:
+        raise FileNotFoundError(
+            "data/raw/ にparquetが見つかりません。先に build_raw.py を実行してください。"
+        )
+
+    feature_tables = []
+    for event_file in event_files:
+        prefix = str(event_file)[: -len("_event.parquet")]
+        race_results_path = Path(f"{prefix}_race_results.parquet")
+        quali_results_path = Path(f"{prefix}_quali_results.parquet")
+        weather_path = Path(f"{prefix}_race_weather.parquet")
+        fp3_laps_path = Path(f"{prefix}_fp3_laps.parquet")
+
+        if not race_results_path.exists() or not quali_results_path.exists():
+            continue
+
+        try:
+            event = pd.read_parquet(event_file)
+            year = int(event["year"].iloc[0])
+            round_number = int(event["round_number"].iloc[0])
+            country = str(event["country"].iloc[0])
+
+            race_results = pd.read_parquet(race_results_path)
+            quali_results = pd.read_parquet(quali_results_path)
+            race_weather = pd.read_parquet(weather_path) if weather_path.exists() else None
+
+            table = build_feature_table_from_raw(
+                race_results=race_results,
+                race_weather=race_weather,
+                quali_results=quali_results,
+                country=country,
+                year=year,
+                round_number=round_number,
+            )
+
+            # FP3 long run pace を追加（存在するラウンドのみ）
+            if fp3_laps_path.exists():
+                fp3_laps = pd.read_parquet(fp3_laps_path)
+                fp3_pace = extract_fp3_long_run_pace(fp3_laps)
+                # FP3のDriverコードは予選結果のAbbreviationと同一のため直接マージできる
+                table = table.merge(
+                    fp3_pace.rename(columns={"Driver": "driver"}),
+                    on="driver",
+                    how="left",
+                )
+            else:
+                table["fp3_long_run_pace"] = np.nan
+
+            if not table.empty:
+                feature_tables.append(table)
+        except Exception as error:
+            print(f"[SKIP] Feature build failed for {event_file.name}: {error}")
+
+    if not feature_tables:
+        raise ValueError("有効なセッションデータが1件も得られませんでした。")
+
+    combined = pd.concat(feature_tables, ignore_index=True)
+    combined = combined.sort_values(["year", "round_number"]).reset_index(drop=True)
+    combined = compute_constructor_avg_finish(combined)
+    combined = compute_driver_rolling_avg_finish(combined)
+    combined = compute_constructor_rolling_avg_finish(combined)
     return combined
 
 

@@ -25,6 +25,8 @@ from src.constants import (
 )
 from src.features import (
     add_constructor_avg_finish_for_prediction,
+    add_constructor_rolling_avg_finish_for_prediction,
+    add_driver_rolling_avg_finish_for_prediction,
     build_feature_table_for_session,
 )
 from src.fetch import (
@@ -270,6 +272,8 @@ def main() -> None:
             )
             train_df = load_training_data_from_csv()
             race_df = add_constructor_avg_finish_for_prediction(race_df, train_df)
+            race_df = add_driver_rolling_avg_finish_for_prediction(race_df, train_df)
+            race_df = add_constructor_rolling_avg_finish_for_prediction(race_df, train_df)
         except Exception as error:
             st.error(f"特徴量テーブルの構築に失敗しました: {error}")
             return
