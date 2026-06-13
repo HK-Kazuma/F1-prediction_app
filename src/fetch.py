@@ -21,6 +21,8 @@ from src.constants import (
     TRAINING_START_YEAR,
 )
 
+SESSION_FP3 = "FP3"
+
 
 def configure_fastf1_cache(cache_dir: str = DATA_CACHE_DIR) -> None:
     """
@@ -78,6 +80,18 @@ def load_qualifying_session(year: int, round_number: int) -> fastf1.core.Session
     return _load_session_with_retry(
         year, round_number, SESSION_QUALIFYING,
         {"laps": False, "telemetry": False, "weather": False, "messages": False},
+    )
+
+
+def load_fp3_session(year: int, round_number: int) -> fastf1.core.Session:
+    """
+    指定した年・ラウンドのFP3セッションをロードして返す。
+    long run paceの算出にlapsが必要なのでlaps=Trueにする。
+    テレメトリは重く不要なので無効にする。
+    """
+    return _load_session_with_retry(
+        year, round_number, SESSION_FP3,
+        {"laps": True, "telemetry": False, "weather": False, "messages": False},
     )
 
 

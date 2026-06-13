@@ -28,12 +28,14 @@ from src.constants import (
     DATA_RAW_DIR,
     FETCH_SLEEP_SECONDS_BETWEEN_ROUNDS,
     FETCH_SLEEP_SECONDS_BETWEEN_SESSIONS,
+    FETCH_SLEEP_SECONDS_FP3,
     TRAINING_END_YEAR,
     TRAINING_START_YEAR,
 )
 from src.fetch import (
     configure_fastf1_cache,
     get_round_numbers_for_year,
+    load_fp3_session,
     load_qualifying_session,
     load_race_session,
 )
@@ -54,6 +56,22 @@ def round_raw_exists(year: int, round_number: int) -> bool:
     return all(
         Path(f"{prefix}_{s}.parquet").exists()
         for s in ["race_results", "quali_results", "event"]
+    )
+
+
+def fp3_raw_exists(year: int, round_number: int) -> bool:
+    """FP3のlapsファイルが存在するか確認する。"""
+    prefix = Path(DATA_RAW_DIR) / f"{year}_{round_number:02d}"
+    return Path(f"{prefix}_fp3_laps.parquet").exists()
+
+
+def save_fp3_raw(year: int, round_number: int, fp3_session) -> None:
+    """FP3のlapsをparquetで保存する。"""
+    raw_dir = Path(DATA_RAW_DIR)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    prefix = raw_dir / f"{year}_{round_number:02d}"
+    _prepare_for_parquet(fp3_session.laps).to_parquet(
+        f"{prefix}_fp3_laps.parquet", index=False
     )
 
 
@@ -88,21 +106,10 @@ def save_round_raw(
     }]).to_parquet(f"{prefix}_event.parquet", index=False)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Fetch F1 sessions and save to data/raw/")
-    parser.add_argument("--start-year", type=int, default=TRAINING_START_YEAR)
-    parser.add_argument("--end-year", type=int, default=TRAINING_END_YEAR)
-    parser.add_argument(
-        "--fast",
-        action="store_true",
-        help="Skip sleep between sessions. Safe to use when FastF1 cache is already warm.",
-    )
-    args = parser.parse_args()
-
+def _run_race_quali_fetch(args) -> None:
+    """Race + Qualifying parquet を取得して保存するメインループ。"""
     sleep_between = 0 if args.fast else FETCH_SLEEP_SECONDS_BETWEEN_SESSIONS
     sleep_after = 0 if args.fast else FETCH_SLEEP_SECONDS_BETWEEN_ROUNDS
-
-    configure_fastf1_cache()
 
     total_saved = 0
     total_skipped = 0
@@ -134,6 +141,74 @@ def main() -> None:
 
     print(f"\nDone. Saved: {total_saved} | Skipped (already exists): {total_skipped}")
     print("Next step: python build_features.py")
+
+
+def _run_fp3_fetch(args) -> None:
+    """FP3 laps parquet を取得して保存するメインループ（Phase 2用）。
+
+    race/qualiが揃っているラウンドのみを対象にする。
+    FP3はlaps=Trueで取得するためAPIコール数が多い。
+    FETCH_SLEEP_SECONDS_FP3（デフォルト180s）で制御する。
+    """
+    sleep_after = 0 if args.fast else FETCH_SLEEP_SECONDS_FP3
+
+    total_saved = 0
+    total_skipped = 0
+
+    for year in range(args.start_year, args.end_year + 1):
+        round_numbers = get_round_numbers_for_year(year)
+        print(f"\n--- FP3 {year} ({len(round_numbers)} rounds) ---")
+
+        for round_number in round_numbers:
+            if not round_raw_exists(year, round_number):
+                print(f"  [SKIP] {year} Round {round_number:02d} (race/quali not yet fetched)")
+                continue
+
+            if fp3_raw_exists(year, round_number):
+                print(f"  [SKIP] {year} Round {round_number:02d} (FP3 already saved)")
+                total_skipped += 1
+                continue
+
+            try:
+                fp3 = load_fp3_session(year, round_number)
+                time.sleep(sleep_after)
+                save_fp3_raw(year, round_number, fp3)
+                print(f"  [OK]   {year} Round {round_number:02d}")
+                total_saved += 1
+            except RateLimitExceededError:
+                print(f"\n[RATE LIMIT] Stopping. Saved {total_saved} FP3 rounds so far.")
+                print("Re-run with --fp3 to continue (already-saved rounds will be skipped).")
+                return
+            except Exception as e:
+                print(f"  [FAIL] {year} Round {round_number:02d}: {e}")
+
+    print(f"\nDone. FP3 saved: {total_saved} | Skipped: {total_skipped}")
+    print("Next step: python build_features_v2.py")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Fetch F1 sessions and save to data/raw/")
+    parser.add_argument("--start-year", type=int, default=TRAINING_START_YEAR)
+    parser.add_argument("--end-year", type=int, default=TRAINING_END_YEAR)
+    parser.add_argument(
+        "--fast",
+        action="store_true",
+        help="Skip sleep between sessions. Safe to use when FastF1 cache is already warm.",
+    )
+    parser.add_argument(
+        "--fp3",
+        action="store_true",
+        help="Fetch FP3 sessions only (for Phase 2 long run pace feature). "
+             "Requires race/quali parquets to already exist.",
+    )
+    args = parser.parse_args()
+
+    configure_fastf1_cache()
+
+    if args.fp3:
+        _run_fp3_fetch(args)
+    else:
+        _run_race_quali_fetch(args)
 
 
 if __name__ == "__main__":

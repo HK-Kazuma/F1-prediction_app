@@ -130,6 +130,16 @@ FETCH_MAX_RETRIES = 3
 DATA_CACHE_DIR = "data/cache"
 DATA_RAW_DIR = "data/raw"
 DATA_PROCESSED_DIR = "data/processed"
+
+# ---------- Phase 1 ----------
 TRAINING_DATA_PATH = "data/processed/training_features.csv"
 DRIVER_DNF_RATES_PATH = "data/processed/driver_dnf_rates.csv"
 MODEL_SAVE_PATH = "data/processed/xgboost_model.json"
+
+# ---------- Phase 2 ----------
+TRAINING_V2_DATA_PATH = "data/processed/training_features_v2.csv"
+MODEL_V2_SAVE_PATH = "data/processed/xgboost_model_v2.json"
+
+# FP3は laps=True で取得するため1セッションあたりのサブリクエストが多い。
+# 500コール/時の上限を守るため通常より長めの待機を設ける。
+FETCH_SLEEP_SECONDS_FP3 = 180
