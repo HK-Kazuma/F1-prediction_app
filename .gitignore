@@ -5,6 +5,19 @@ data/cache/
 data/processed/training_features.csv
 data/processed/xgboost_model.json
 
+# Phase 2: RAG ストレージ（再構築可能、大きい）
+data/rag_storage/
+data/processed/training_features_v2.csv
+data/processed/xgboost_model_v2.json
+
+# APIキー（絶対にコミットしない）
+.env
+.env.local
+
+# ダウンロードしたFIA文書（著作権のため）
+data/regulations/
+data/race_docs/
+
 # Python 関連
 __pycache__/
 *.py[cod]

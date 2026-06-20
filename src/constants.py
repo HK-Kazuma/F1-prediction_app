@@ -140,6 +140,30 @@ MODEL_SAVE_PATH = "data/processed/xgboost_model.json"
 TRAINING_V2_DATA_PATH = "data/processed/training_features_v2.csv"
 MODEL_V2_SAVE_PATH = "data/processed/xgboost_model_v2.json"
 
+# ---------- Phase 2 / RAG ----------
+
+# LightRAG がKnowledge Graphのインデックスを保存するディレクトリ
+RAG_STORAGE_DIR = "data/rag_storage"
+
+# FIA Technical Regulations PDF の保存先 (年ごと)
+# 例: data/regulations/2026/technical_regulations.pdf
+FIA_REGULATIONS_DIR = "data/regulations"
+
+# レース週末資料 (Pirelli Preview / Race Director Notes) の保存先
+# 例: data/race_docs/2025/round_01_bahrain/pirelli_preview.pdf
+FIA_RACE_DOCS_DIR = "data/race_docs"
+
+# Pirelli特徴量スコアのキャッシュ (年×ラウンド → スコア)
+PIRELLI_FEATURES_PATH = "data/processed/pirelli_features.csv"
+
+# チームDNAスコアのキャッシュ (年ごとにJSONで保存)
+# 実際のファイル名は team_dna_scores_{year}.json になる
+TEAM_DNA_SCORES_PATH = "data/processed/team_dna_scores.json"
+
+# Gemini 無料枠は15 RPM。LLM呼び出し間のスリープ秒数
+# 4.5秒 × 10チーム = 45秒でチームDNAスコアが揃う
+GEMINI_RATE_LIMIT_SLEEP_SECONDS = 4.5
+
 # ドライバー・コンストラクターのローリング平均フィニッシュのウィンドウサイズ。
 # 全履歴の展開平均より直近フォームを重視しつつ、
 # ウィンドウが小さすぎると1レースの異常値に過敏になるため5戦に設定する。
