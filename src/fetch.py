@@ -101,6 +101,24 @@ def get_round_numbers_for_year(year: int) -> list[int]:
     return schedule["RoundNumber"].tolist()
 
 
+def get_round_schedule(year: int) -> list[dict]:
+    """
+    その年の全ラウンドのスケジュール情報をリストで返す。
+    サイドバーのラウンド選択UIに使う。
+
+    Returns: [{"round_number": int, "country": str, "location": str}, ...]
+    """
+    schedule = fastf1.get_event_schedule(year, include_testing=False)
+    return [
+        {
+            "round_number": int(row["RoundNumber"]),
+            "country": str(row.get("Country", "")),
+            "location": str(row.get("Location", "")),
+        }
+        for _, row in schedule.iterrows()
+    ]
+
+
 def get_event_info(year: int, round_number: int) -> dict:
     """
     指定した年・ラウンドのサーキット名と国名を返す。

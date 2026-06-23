@@ -15,6 +15,7 @@ import plotly.express as px
 import streamlit as st
 
 from src.constants import (
+    COUNTRY_ABBR,
     DATA_PROCESSED_DIR,
     MODEL_V2_SAVE_PATH,
     TARGET_COLUMN,
@@ -31,8 +32,7 @@ from src.features import (
 )
 from src.fetch import (
     configure_fastf1_cache,
-    get_event_info,
-    get_round_numbers_for_year,
+    get_round_schedule,
     load_qualifying_session,
     load_race_session,
 )
@@ -63,6 +63,13 @@ def get_feature_columns(df: pd.DataFrame) -> list[str]:
     """学習に使う特徴量列名だけを返す。"""
     non_feature_cols = {"year", "round_number", "driver", "constructor", TARGET_COLUMN}
     return [col for col in df.columns if col not in non_feature_cols]
+
+
+@st.cache_data(show_spinner=False)
+def load_round_schedule(year: int) -> list[dict]:
+    """サイドバーのラウンド選択に使うスケジュール情報をキャッシュして返す。"""
+    configure_fastf1_cache()
+    return get_round_schedule(year)
 
 
 @st.cache_data(show_spinner=False)
@@ -211,16 +218,19 @@ def main() -> None:
 
     st.sidebar.header("設定")
     selected_year = st.sidebar.selectbox("シーズン", options=[TEST_YEAR], index=0)
-    selected_round = st.sidebar.number_input(
-        "ラウンド番号", min_value=1, max_value=24, value=1, step=1
-    )
 
-    configure_fastf1_cache()
-    event_info = get_event_info(selected_year, int(selected_round))
-    st.sidebar.info(
-        f"🏁 **{event_info['circuit_name']}**\n\n"
-        f"🌍 {event_info['country']}"
-    )
+    round_schedule = load_round_schedule(selected_year)
+    round_labels = [
+        f"Round {r['round_number']:02d}  {COUNTRY_ABBR.get(r['country'], '???')}  {r['location']}"
+        for r in round_schedule
+    ]
+    selected_label = st.sidebar.selectbox("ラウンド", round_labels)
+    selected_idx = round_labels.index(selected_label)
+    selected_round = round_schedule[selected_idx]["round_number"]
+    event_info = {
+        "circuit_name": round_schedule[selected_idx]["location"],
+        "country": round_schedule[selected_idx]["country"],
+    }
 
     st.sidebar.divider()
     st.sidebar.caption(

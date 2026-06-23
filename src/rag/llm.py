@@ -19,7 +19,7 @@ from typing import Any
 import google.generativeai as genai
 from lightrag.utils import EmbeddingFunc
 
-_GEMINI_LLM_MODEL = "gemini-1.5-flash"
+_GEMINI_LLM_MODEL = "gemini-2.0-flash"
 _GEMINI_EMBED_MODEL = "models/text-embedding-004"
 _EMBED_DIM = 768       # text-embedding-004 の出力次元数
 _EMBED_MAX_TOKENS = 8192

@@ -69,14 +69,31 @@ def _matches(title: str, keywords: list[str]) -> bool:
 
 
 def _contains_round(title: str, round_number: int) -> bool:
-    """タイトルにラウンド番号または「Round X」が含まれるか確認する。"""
-    patterns = [
-        str(round_number),
-        f"round {round_number}",
-        f"round {round_number:02d}",
-    ]
+    """
+    タイトルにラウンド番号が含まれるか確認する。
+
+    単語境界 (\b) を使って "Formula 1" や "Document 14" などへの
+    誤マッチを防ぐ。FIAの命名例: "R01", "Round 1", "25R01BAH"
+    """
     t = title.lower()
-    return any(p in t for p in patterns)
+    patterns = [
+        rf"\bround\s*{round_number}\b",           # "Round 1", "Round 01"
+        rf"\br{round_number:02d}\b",               # "R01"
+        rf"(?<!\d){round_number:02d}(?!\d)",       # "25R01BAH" の "01"
+    ]
+    return any(re.search(p, t) for p in patterns)
+
+
+def _contains_event(title: str, event_name: str) -> bool:
+    """
+    タイトルにイベント名が含まれるか確認する（部分一致・大小文字無視）。
+    event_name="bahrain" → "Bahrain" or "BAH" にマッチ。
+    """
+    t = title.lower()
+    name = event_name.lower()
+    # 先頭3文字の略称でもチェック（例: bahrain → bah）
+    abbr = name[:3]
+    return name in t or abbr in t
 
 
 def _fetch_doc_list(year: int) -> list[dict]:
@@ -175,7 +192,11 @@ def fetch_race_docs(
 
     for doc in docs:
         title = doc["title"]
-        if not _contains_round(title, round_number):
+        url = doc["url"]
+        # ラウンド番号 OR イベント名のどちらかでフィルタ（両方あればなお確実）
+        round_ok = _contains_round(title, round_number) or _contains_round(url, round_number)
+        event_ok = _contains_event(title, event_name) or _contains_event(url, event_name)
+        if not (round_ok or event_ok):
             continue
         if result["pirelli"] is None and _matches(title, _PIRELLI_KEYWORDS):
             dest = round_dir / "pirelli_preview.pdf"

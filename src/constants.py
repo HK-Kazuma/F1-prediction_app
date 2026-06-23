@@ -84,6 +84,60 @@ CIRCUIT_TYPE_MAP: dict[str, str] = {
     "Miami": CIRCUIT_TYPE_STREET,
 }
 
+# 国名 → 3文字略称マッピング（FastF1の event["Country"] と一致させる）
+COUNTRY_ABBR: dict[str, str] = {
+    "Bahrain":       "BHR",
+    "Saudi Arabia":  "KSA",
+    "Australia":     "AUS",
+    "Japan":         "JPN",
+    "China":         "CHN",
+    "United States": "USA",
+    "Italy":         "ITA",
+    "Monaco":        "MON",
+    "Canada":        "CAN",
+    "Spain":         "ESP",
+    "Austria":       "AUT",
+    "Great Britain": "GBR",
+    "Hungary":       "HUN",
+    "Belgium":       "BEL",
+    "Netherlands":   "NED",
+    "Azerbaijan":    "AZE",
+    "Singapore":     "SGP",
+    "Mexico":        "MEX",
+    "Brazil":        "BRA",
+    "UAE":           "UAE",
+    "Qatar":         "QAT",
+    "Las Vegas":     "USA",
+    "Miami":         "USA",
+}
+
+# 国名 → 国旗絵文字マッピング（FastF1の event["Country"] と一致させる）
+COUNTRY_FLAG: dict[str, str] = {
+    "Bahrain":       "🇧🇭",
+    "Saudi Arabia":  "🇸🇦",
+    "Australia":     "🇦🇺",
+    "Japan":         "🇯🇵",
+    "China":         "🇨🇳",
+    "United States": "🇺🇸",
+    "Italy":         "🇮🇹",
+    "Monaco":        "🇲🇨",
+    "Canada":        "🇨🇦",
+    "Spain":         "🇪🇸",
+    "Austria":       "🇦🇹",
+    "Great Britain": "🇬🇧",
+    "Hungary":       "🇭🇺",
+    "Belgium":       "🇧🇪",
+    "Netherlands":   "🇳🇱",
+    "Azerbaijan":    "🇦🇿",
+    "Singapore":     "🇸🇬",
+    "Mexico":        "🇲🇽",
+    "Brazil":        "🇧🇷",
+    "UAE":           "🇦🇪",
+    "Qatar":         "🇶🇦",
+    "Las Vegas":     "🇺🇸",
+    "Miami":         "🇺🇸",
+}
+
 # XGBoostに渡すためにカテゴリを整数にエンコード
 CIRCUIT_TYPE_ENCODING: dict[str, int] = {
     CIRCUIT_TYPE_HIGH_SPEED: 0,
