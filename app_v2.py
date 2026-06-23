@@ -221,7 +221,7 @@ def main() -> None:
 
     round_schedule = load_round_schedule(selected_year)
     round_labels = [
-        f"Round {r['round_number']:02d}  {COUNTRY_ABBR.get(r['country'], '???')}  {r['location']}"
+        f"{r['round_number']:02d}  {COUNTRY_ABBR.get(r['country'], '???')}  {r['location']}"
         for r in round_schedule
     ]
     selected_label = st.sidebar.selectbox("ラウンド", round_labels)
